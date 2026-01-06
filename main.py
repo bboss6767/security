@@ -3,7 +3,7 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 
-# ---------- TOKEN ----------
+# ---------- TOKEN FROM ENV ----------
 TOKEN = os.getenv("DISCORD_TOKEN")
 
 # ---------- INTENTS ----------
@@ -15,10 +15,8 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 # ---------- STORAGE ----------
 guild_settings = {}
-# {guild_id: {"log_channel": int, "invite_channel": int}}
-
-invites = {}        # {guild_id: list_of_invites}
-invite_counts = {}  # {user_id: count}
+invites = {}
+invite_counts = {}
 
 # ---------- READY ----------
 @bot.event
@@ -26,21 +24,16 @@ async def on_ready():
     print(f"✅ Logged in as {bot.user}")
 
     for guild in bot.guilds:
-        try:
-            invites[guild.id] = await guild.invites()
-        except discord.Forbidden:
-            invites[guild.id] = []
+        invites[guild.id] = await guild.invites()
 
     await bot.tree.sync()
     print("✅ Slash commands synced")
 
 # ---------- SET JOIN LOG CHANNEL ----------
 @bot.tree.command(name="set_log_channel", description="Set channel for join logs")
-@app_commands.describe(channel="Channel where join messages will be sent")
 async def set_log_channel(interaction: discord.Interaction, channel: discord.TextChannel):
     guild_settings.setdefault(interaction.guild.id, {})
     guild_settings[interaction.guild.id]["log_channel"] = channel.id
-
     await interaction.response.send_message(
         f"✅ Join logs set to {channel.mention}",
         ephemeral=True
@@ -48,10 +41,8 @@ async def set_log_channel(interaction: discord.Interaction, channel: discord.Tex
 
 # ---------- REMOVE JOIN LOG CHANNEL ----------
 @bot.tree.command(name="remove_log_channel", description="Remove join log channel")
-@app_commands.describe(channel="Channel to remove")
 async def remove_log_channel(interaction: discord.Interaction, channel: discord.TextChannel):
     settings = guild_settings.get(interaction.guild.id, {})
-
     if settings.get("log_channel") == channel.id:
         del settings["log_channel"]
         await interaction.response.send_message(
@@ -60,17 +51,15 @@ async def remove_log_channel(interaction: discord.Interaction, channel: discord.
         )
     else:
         await interaction.response.send_message(
-            "❌ That channel is not the current join log channel.",
+            "❌ That channel is not set.",
             ephemeral=True
         )
 
 # ---------- SET INVITE LOG CHANNEL ----------
 @bot.tree.command(name="set_invite_channel", description="Set channel for invite logs")
-@app_commands.describe(channel="Channel where invite info will be sent")
 async def set_invite_channel(interaction: discord.Interaction, channel: discord.TextChannel):
     guild_settings.setdefault(interaction.guild.id, {})
     guild_settings[interaction.guild.id]["invite_channel"] = channel.id
-
     await interaction.response.send_message(
         f"✅ Invite logs set to {channel.mention}",
         ephemeral=True
@@ -78,10 +67,8 @@ async def set_invite_channel(interaction: discord.Interaction, channel: discord.
 
 # ---------- REMOVE INVITE LOG CHANNEL ----------
 @bot.tree.command(name="remove_invite_channel", description="Remove invite log channel")
-@app_commands.describe(channel="Channel to remove")
 async def remove_invite_channel(interaction: discord.Interaction, channel: discord.TextChannel):
     settings = guild_settings.get(interaction.guild.id, {})
-
     if settings.get("invite_channel") == channel.id:
         del settings["invite_channel"]
         await interaction.response.send_message(
@@ -90,7 +77,7 @@ async def remove_invite_channel(interaction: discord.Interaction, channel: disco
         )
     else:
         await interaction.response.send_message(
-            "❌ That channel is not the current invite log channel.",
+            "❌ That channel is not set.",
             ephemeral=True
         )
 
@@ -100,40 +87,34 @@ async def on_member_join(member):
     guild = member.guild
     settings = guild_settings.get(guild.id, {})
 
+    new_invites = await guild.invites()
+    old_invites = invites.get(guild.id, [])
     inviter = None
+
+    for new in new_invites:
+        for old in old_invites:
+            if new.code == old.code and new.uses > old.uses:
+                inviter = new.inviter
+                break
+
+    invites[guild.id] = new_invites
+
     total = 0
-
-    try:
-        new_invites = await guild.invites()
-        old_invites = invites.get(guild.id, [])
-
-        for new in new_invites:
-            for old in old_invites:
-                if new.code == old.code and new.uses > old.uses:
-                    inviter = new.inviter
-                    break
-
-        invites[guild.id] = new_invites
-    except discord.Forbidden:
-        pass
-
     if inviter:
         invite_counts[inviter.id] = invite_counts.get(inviter.id, 0) + 1
         total = invite_counts[inviter.id]
 
-    # ----- JOIN LOG CHANNEL -----
-    log_channel_id = settings.get("log_channel")
-    if log_channel_id:
-        channel = guild.get_channel(log_channel_id)
+    # Join log
+    log_id = settings.get("log_channel")
+    if log_id:
+        channel = guild.get_channel(log_id)
         if channel:
-            await channel.send(
-                f"📥 **{member.mention} joined the server**"
-            )
+            await channel.send(f"📥 **{member.mention} joined the server**")
 
-    # ----- INVITE LOG CHANNEL -----
-    invite_channel_id = settings.get("invite_channel")
-    if invite_channel_id:
-        channel = guild.get_channel(invite_channel_id)
+    # Invite log
+    invite_id = settings.get("invite_channel")
+    if invite_id:
+        channel = guild.get_channel(invite_id)
         if channel:
             await channel.send(
                 f"📥 **{member.mention} joined**\n"
